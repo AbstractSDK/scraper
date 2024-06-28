@@ -4,6 +4,7 @@ mod metrics;
 
 pub use bot::Scraper;
 pub use bot_args::BotArgs;
+use cw_orch_interchain::{ChannelCreationValidator, DaemonInterchain, IbcQueryHandler};
 use metrics::serve_metrics;
 pub use metrics::Metrics;
 
@@ -19,29 +20,17 @@ use prometheus::Registry;
 pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
     let rt = Runtime::new()?;
     let registry = Registry::new();
-    let mut chain_info = OSMOSIS_1;
-    let grpc_urls = if !bot_args.grps_urls.is_empty() {
-        bot_args.grps_urls.iter().map(String::as_ref).collect()
-    } else {
-        chain_info.grpc_urls.to_vec()
-    };
+    let chain_info = OSMOSIS_1;
 
-    chain_info.grpc_urls = &grpc_urls;
     let daemon = Daemon::builder()
         .handle(rt.handle())
         .chain(chain_info.clone())
         .build()?;
-
-    let module_info =
-        ModuleInfo::from_id(APP_ID, ModuleVersion::Version(APP_VERSION.parse().unwrap()))?;
-
-    let mut bot = Scraper::new(
-        daemon,
-        module_info,
-        bot_args.fetch_cooldown,
-        bot_args.autocompound_cooldown,
-        &registry,
-    );
+    let daemons = vec![daemon];
+    let chain_ids = daemons.iter().map(|daemon| daemon.chain_id()).collect();
+    let interchain =
+        DaemonInterchain::from_daemons(rt.handle(), daemons, &ChannelCreationValidator);
+    let mut bot = Scraper::new(interchain, bot_args.fetch_cooldown, &registry, chain_ids);
 
     let metrics_rt = Runtime::new()?;
     metrics_rt.spawn(serve_metrics(registry.clone()));
@@ -52,12 +41,15 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
         bot.scrape()?;
 
         // Wait for autocompound duration
-        std::thread::sleep(bot.autocompound_cooldown);
+        std::thread::sleep(bot.fetch_cooldown);
+
+        // TODO: reconnect all daemons after sleep?
+        // Maybe will be better to not build daemons until we actively use it
 
         // Reconnect
-        bot.daemon = Daemon::builder()
-            .handle(rt.handle())
-            .chain(chain_info.clone())
-            .build()?;
+        // bot.daemon = Daemon::builder()
+        //     .handle(rt.handle())
+        //     .chain(chain_info.clone())
+        //     .build()?;
     }
 }

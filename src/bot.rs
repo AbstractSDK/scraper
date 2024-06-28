@@ -1,12 +1,11 @@
 use abstract_client::{AbstractClient, AccountSource, Environment};
 use cw_asset::AssetInfo;
-use cw_orch_interchain::{DaemonInterchain, InterchainEnv};
+use cw_orch_interchain::DaemonInterchain;
 use semver::VersionReq;
 
 use crate::Metrics;
-use cosmos_sdk_proto::{
-    cosmwasm::wasm::v1::{query_client::QueryClient, QueryContractsByCodeRequest},
-    traits::Message as _,
+use cosmos_sdk_proto::cosmwasm::wasm::v1::{
+    query_client::QueryClient, QueryContractsByCodeRequest,
 };
 
 use cosmwasm_std::Uint128;
@@ -26,12 +25,15 @@ use tonic::transport::Channel;
 
 pub struct Scraper {
     // Fetch information
-    fetch_cooldown: Duration,
+    pub fetch_cooldown: Duration,
     last_fetch: SystemTime,
     // Chains to Fetch
     interchain: DaemonInterchain,
     // metrics
     metrics: Metrics,
+    // proxy instances
+    // Chain id -> proxy addresses
+    proxy_instances: HashMap<String, Vec<String>>,
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
@@ -81,197 +83,49 @@ impl Scraper {
         interchain: DaemonInterchain,
         fetch_cooldown: Duration,
         registry: &Registry,
+        chain_ids: Vec<String>,
     ) -> Self {
         let metrics = Metrics::new(registry);
 
         Self {
-            fetch_cooldown, 
+            fetch_cooldown,
             interchain,
             last_fetch: SystemTime::UNIX_EPOCH,
             metrics,
+            proxy_instances: HashMap::from_iter(chain_ids.into_iter().map(|id| (id, vec![]))),
         }
     }
 
     // Fetches contracts and assets if fetch cooldown passed
     pub fn scrape(&mut self) -> anyhow::Result<()> {
         // Don't fetch if not ready
-        let ready_time = self.last_fetch + self.fetch_contracts_cooldown;
+        let ready_time = self.last_fetch + self.fetch_cooldown;
         if SystemTime::now() < ready_time {
             return Ok(());
         }
 
         log!(Level::Info, "Fetching contracts and assets");
 
-        let daemon = &self.daemon;
+        let interchain = &self.interchain;
 
-        let abstr = AbstractClient::new(self.daemon.clone())?;
-        // Refresh asset values
-        log!(Level::Debug, "Fetching assets");
-        self.assets_value = {
-            let names = USD_ASSETS
-                .into_iter()
-                .map(ToOwned::to_owned)
-                .collect::<Vec<String>>();
-            let assets_response: ans_host::AssetsResponse = abstr
-                .name_service()
-                .query(&ans_host::QueryMsg::Assets { names })?;
-            assets_response
-                .assets
-                .into_iter()
-                // For now we just assume 1 usd asset == 1 usd
-                .map(|(_, info)| (info, Uint128::one()))
-                .collect()
-        };
-
-        let mut contract_instances_to_autocompound: HashSet<(String, CarrotInstance)> =
-            HashSet::new();
-
-        log!(Level::Debug, "Fetching modules");
-        let saving_modules = abstr.version_control().module_list(
-            Some(ModuleFilter {
-                namespace: Some(self.module_info.namespace.to_string()),
-                name: Some(self.module_info.name.clone()),
-                version: None,
-                status: Some(ModuleStatus::Registered),
-            }),
-            None,
-            None,
-        )?;
+        // TODO: chain iterator for interchain?
+        for (chain_id, proxy_instances) in self.proxy_instances.iter_mut() {
+            // TODO: proxy_instances
+            *proxy_instances = vec![];
+        }
+        // let abstr = AbstractClient::new(self.daemon.clone())?;
+        // self.proxy_instances[chain_id] = vec![];
 
         let mut fetch_instances_count = 0;
-
-        let ver_req = VersionReq::parse(VERSION_REQ).unwrap();
-        log!(Level::Debug, "version requirement: {ver_req}");
-        for app_info in saving_modules.modules {
-            let version = app_info.module.info.version.to_string();
-
-            let code_id = app_info.module.reference.unwrap_app()?;
-
-            let mut contract_addrs = daemon.rt_handle.block_on(utils::fetch_instances(
-                daemon.channel(),
-                code_id,
-                &version,
-            ))?;
-            fetch_instances_count += contract_addrs.len();
-
-            // Need to reset contract balances in case some of the contracts migrated
-            self.metrics.contract_balance.reset();
-            for contract_addr in contract_addrs.iter() {
-                let address = Addr::unchecked(contract_addr.clone());
-                let balance_result =
-                    utils::get_carrot_balance(daemon.clone(), &self.assets_value, &address);
-                let balance = match balance_result {
-                    Ok(value) => value,
-                    Err(_) => Uint128::zero(), // Handle potential errors
-                };
-
-                // Update contract_balance GaugeVec with label
-                let label = labels! {"contract_address"=> contract_addr.as_ref(),"contract_version"=> version.as_ref()};
-
-                self.metrics
-                    .contract_balance
-                    .with(&label)
-                    .set(balance.u128().try_into().unwrap());
-            }
-
-            // Skip if version mismatches
-            if semver::Version::parse(&version)
-                .map(|v| !ver_req.matches(&v))
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            // Only keep the contract addresses that have the required permissions
-            contract_addrs.retain(|address| {
-                utils::has_authz_permission(&abstr, address)
-                    // Don't include if queries fail.
-                    .unwrap_or_default()
-            });
-
-            // Add all the entries to the `contract_instances_to_check`
-            contract_instances_to_autocompound.extend(contract_addrs.into_iter().map(|addr| {
-                (
-                    app_info.module.info.id(),
-                    CarrotInstance::new(Addr::unchecked(addr), version.as_ref()),
-                )
-            }));
-        }
-
-        self.contract_instances_to_ac = contract_instances_to_autocompound;
 
         // Metrics
         self.metrics.fetch_count.inc();
         self.metrics
             .fetch_instances_count
             .set(fetch_instances_count as i64);
-        self.metrics
-            .contract_instances_to_autocompound
-            .set(self.contract_instances_to_ac.len() as i64);
 
         Ok(())
     }
-
-    // Autocompound all saved instances and wait for cooldown duration
-    pub fn autocompound(&self) {
-        for (id, contract) in self.contract_instances_to_ac.iter() {
-            let version = &contract.version;
-            let addr = &contract.address;
-            let label = labels! {"contract_version"=> version.as_ref()};
-            match autocompound_instance(&self.daemon, (id, addr)) {
-                // Successful autocompound
-                Ok(CompoundStatus::Ready {}) => {
-                    self.metrics.autocompounded_count.with(&label).inc()
-                }
-                // Checked contract not ready for autocompound
-                Ok(status) => {
-                    log!(Level::Info, "Skipped {contract}: {status:?}");
-                    self.metrics
-                        .autocompounded_not_ready_count
-                        .with(&label)
-                        .inc();
-                }
-                // Contract (or bot) errored during autocompound
-                Err(err) => {
-                    log!(
-                        Level::Error,
-                        "error ocurred for {contract} carrot-app: {err:?}"
-                    );
-                    self.metrics.autocompounded_error_count.with(&label).inc();
-                }
-            }
-        }
-    }
-}
-
-fn autocompound_instance(
-    daemon: &Daemon,
-    instance: (&str, &Addr),
-) -> anyhow::Result<CompoundStatus> {
-    let (id, address) = instance;
-    let app = AppInterface::new(id, daemon.clone());
-    app.set_address(address);
-    use carrot_app::AppQueryMsgFns;
-    let resp: CompoundStatusResponse = app.compound_status()?;
-
-    // Ensure contract is ready for autocompound,
-    // user can send rewards,
-    // spread rewards not empty
-    // and bot will get paid enough to cover gas fees
-    if resp.status.is_ready()
-        && resp.autocompound_reward_available
-        && !resp.spread_rewards.is_empty()
-        && utils::enough_rewards(resp.autocompound_reward)
-    {
-        // Execute autocompound
-        daemon.execute(
-            &ExecuteMsg::from(AppExecuteMsg::Autocompound {}),
-            &[],
-            address,
-        )?;
-    }
-
-    Ok(resp.status)
 }
 
 mod utils {
@@ -332,90 +186,15 @@ mod utils {
         }
     }
 
-    /// Finds the account owner and checks if the contract has authz permissions on it.
-    pub fn has_authz_permission(
-        abstr: &AbstractClient<Daemon>,
-        contract_addr: &String,
-    ) -> anyhow::Result<bool> {
-        let daemon = abstr.environment();
-
-        let account = abstr.account_from(AccountSource::App(Addr::unchecked(contract_addr)))?;
-        let granter = account.owner()?;
-
-        // Check if authz is indeed given
-        let authz_querier: Authz = daemon.querier();
-        let authz_grantee = contract_addr.to_string();
-
-        let grants = daemon
-            .rt_handle
-            .block_on(async {
-                authz_querier
-                    ._grants(
-                        granter.to_string(),
-                        authz_grantee.clone(),
-                        // Get every authorization
-                        "".to_owned(),
-                        None,
-                    )
-                    .await
-            })?
-            .grants;
-        let generic_authorizations: Vec<GenericAuthorization> = grants
-            .iter()
-            .filter_map(|grant| {
-                GenericAuthorization::decode(&*grant.authorization.clone().unwrap().value).ok()
-            })
-            .collect();
-        // Check all generic authorizations are in place
-        for &authorization_url in AUTHORIZATION_URLS {
-            if !generic_authorizations.contains(&GenericAuthorization {
-                msg: authorization_url.to_owned(),
-            }) {
-                return Ok(false);
-            }
-        }
-
-        // Check any of send authorization is in place
-        if !generic_authorizations.contains(&GenericAuthorization {
-            msg: MsgSend::TYPE_URL.to_owned(),
-        }) {
-            let send_authorizations: Vec<SendAuthorization> = grants
-                .iter()
-                .filter_map(|grant| {
-                    SendAuthorization::decode(&*grant.authorization.clone().unwrap().value).ok()
-                })
-                .collect();
-            if send_authorizations.is_empty() {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
     /// gets the balance managed by an instance
-    pub fn get_carrot_balance(
+    pub fn get_proxy_balance(
         daemon: Daemon,
         assets_values: &HashMap<AssetInfo, Uint128>,
         contract_addr: &Addr,
     ) -> anyhow::Result<Uint128> {
-        let response: carrot_app::msg::AssetsBalanceResponse =
-            daemon.query(&QueryMsg::from(AppQueryMsg::Balance {}), contract_addr)?;
-
-        let balance = Balance::new(
-            response
-                .balances
-                .into_iter()
-                .map(|coin| ValuedCoin {
-                    usd_value: assets_values
-                        .get(&AssetInfo::native(coin.denom.clone()))
-                        .map(ToOwned::to_owned)
-                        .unwrap_or(Uint128::zero()),
-                    coin,
-                })
-                .collect(),
-        );
+        // TODO: get proxy balance to summarize TVL
+        let balance = Balance::new(vec![]);
         let balance = balance.calculate_usd_value();
-
         log!(
             Level::Info,
             "contract: {contract_addr:?} balance: {balance:?}"
