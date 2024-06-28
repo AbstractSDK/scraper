@@ -2,13 +2,11 @@ mod bot;
 mod bot_args;
 mod metrics;
 
-pub use bot::Bot;
+pub use bot::Scraper;
 pub use bot_args::BotArgs;
 use metrics::serve_metrics;
 pub use metrics::Metrics;
 
-use abstract_app::objects::module::{ModuleInfo, ModuleVersion};
-use carrot_app::contract::{APP_ID, APP_VERSION};
 use cw_orch::{
     anyhow,
     daemon::{networks::OSMOSIS_1, Daemon},
@@ -37,7 +35,7 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
     let module_info =
         ModuleInfo::from_id(APP_ID, ModuleVersion::Version(APP_VERSION.parse().unwrap()))?;
 
-    let mut bot = Bot::new(
+    let mut bot = Scraper::new(
         daemon,
         module_info,
         bot_args.fetch_cooldown,
@@ -51,11 +49,7 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
     // Run long-running autocompound job.
     loop {
         // You can edit retries with CW_ORCH_MAX_TX_QUERY_RETRIES
-        bot.fetch_contracts_and_assets()?;
-        bot.autocompound();
-
-        // Drop connection
-        drop(bot.daemon);
+        bot.scrape()?;
 
         // Wait for autocompound duration
         std::thread::sleep(bot.autocompound_cooldown);

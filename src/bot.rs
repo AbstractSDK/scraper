@@ -1,11 +1,6 @@
 use abstract_client::{AbstractClient, AccountSource, Environment};
-use carrot_app::{
-    msg::{
-        AppExecuteMsg, AppQueryMsg, CompoundStatus, CompoundStatusResponse, ExecuteMsg, QueryMsg,
-    },
-    AppInterface,
-};
 use cw_asset::AssetInfo;
+use cw_orch_interchain::{DaemonInterchain, InterchainEnv};
 use semver::VersionReq;
 
 use crate::Metrics;
@@ -21,19 +16,6 @@ use cw_orch::{
     prelude::*,
 };
 use log::{log, Level};
-use osmosis_std::types::{
-    cosmos::{
-        authz::v1beta1::GenericAuthorization,
-        bank::v1beta1::{MsgSend, SendAuthorization},
-    },
-    osmosis::{
-        concentratedliquidity::v1beta1::{
-            MsgAddToPosition, MsgCollectIncentives, MsgCollectSpreadRewards, MsgCreatePosition,
-            MsgWithdrawPosition,
-        },
-        gamm::v1beta1::MsgSwapExactAmountIn,
-    },
-};
 use prometheus::{labels, Registry};
 use std::{
     collections::{HashMap, HashSet},
@@ -42,38 +24,14 @@ use std::{
 };
 use tonic::transport::Channel;
 
-use abstract_app::{
-    abstract_core::{ans_host, version_control::ModuleFilter},
-    abstract_interface::VCQueryFns,
-    objects::module::{ModuleInfo, ModuleStatus},
-};
-
-const VERSION_REQ: &str = ">=0.4, <0.5";
-
-const AUTHORIZATION_URLS: &[&str] = &[
-    MsgCreatePosition::TYPE_URL,
-    MsgSwapExactAmountIn::TYPE_URL,
-    MsgAddToPosition::TYPE_URL,
-    MsgWithdrawPosition::TYPE_URL,
-    MsgCollectIncentives::TYPE_URL,
-    MsgCollectSpreadRewards::TYPE_URL,
-];
-
-const USD_ASSETS: [&str; 3] = ["eth>axelar>usdc", "noble>usdc", "kava>usdt"];
-
-pub struct Bot {
-    pub daemon: Daemon,
+pub struct Scraper {
     // Fetch information
-    module_info: ModuleInfo,
-    fetch_contracts_cooldown: Duration,
+    fetch_cooldown: Duration,
     last_fetch: SystemTime,
-    // Autocompound information
-    contract_instances_to_ac: HashSet<(String, CarrotInstance)>,
-    pub autocompound_cooldown: Duration,
+    // Chains to Fetch
+    interchain: DaemonInterchain,
     // metrics
     metrics: Metrics,
-    // Resolved assets and their value
-    assets_value: HashMap<AssetInfo, Uint128>,
 }
 
 #[derive(Eq, Hash, PartialEq, Clone)]
@@ -118,30 +76,24 @@ struct ValuedCoin {
     usd_value: Uint128,
 }
 
-impl Bot {
+impl Scraper {
     pub fn new(
-        daemon: Daemon,
-        module_info: ModuleInfo,
-        fetch_contracts_cooldown: Duration,
-        autocompound_cooldown: Duration,
+        interchain: DaemonInterchain,
+        fetch_cooldown: Duration,
         registry: &Registry,
     ) -> Self {
         let metrics = Metrics::new(registry);
 
         Self {
-            daemon,
-            module_info,
-            fetch_contracts_cooldown,
+            fetch_cooldown, 
+            interchain,
             last_fetch: SystemTime::UNIX_EPOCH,
-            contract_instances_to_ac: Default::default(),
-            autocompound_cooldown,
             metrics,
-            assets_value: Default::default(),
         }
     }
 
     // Fetches contracts and assets if fetch cooldown passed
-    pub fn fetch_contracts_and_assets(&mut self) -> anyhow::Result<()> {
+    pub fn scrape(&mut self) -> anyhow::Result<()> {
         // Don't fetch if not ready
         let ready_time = self.last_fetch + self.fetch_contracts_cooldown;
         if SystemTime::now() < ready_time {
