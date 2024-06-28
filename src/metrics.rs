@@ -1,96 +1,49 @@
-use prometheus::{
-    Encoder, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry, TextEncoder,
-};
+use prometheus::{core::AtomicU64, Encoder, IntCounter, Opts, Registry, TextEncoder};
 
 use warp::Filter;
 
+pub type ContractInstances = prometheus::core::GenericGaugeVec<AtomicU64>;
+
 pub struct Metrics {
     pub fetch_count: IntCounter,
-    pub fetch_instances_count: IntGauge,
-    pub autocompounded_count: IntCounterVec,
-    pub autocompounded_not_ready_count: IntCounterVec,
-    pub autocompounded_error_count: IntCounterVec,
-    pub contract_instances_to_autocompound: IntGauge,
-    // balance of every instance
-    pub contract_balance: IntGaugeVec,
+    pub local_account_instances_count: ContractInstances,
+    pub remote_account_instances_count: ContractInstances,
 }
 
 impl Metrics {
     pub fn new(registry: &Registry) -> Self {
         let fetch_count = IntCounter::new(
-            "carrot_app_bot_fetch_count",
+            "scraper_app_bot_fetch_count",
             "Number of times the bot has fetched the instances",
         )
         .unwrap();
-        let fetch_instances_count = IntGauge::new(
-            "carrot_app_bot_fetch_instances_count",
-            "Number of fetched instances",
-        )
-        .unwrap();
-        let autocompounded_count = IntCounterVec::new(
+        let local_account_instances_count = ContractInstances::new(
             Opts::new(
-                "carrot_app_bot_autocompounded_count",
-                "Number of times contracts have been autocompounded",
+                "scraper_bot_local_account_instances_count",
+                "Number of local account instances",
             ),
-            &["contract_version"],
+            &["chain_id"],
         )
         .unwrap();
-        let autocompounded_not_ready_count = IntCounterVec::new(
+        let remote_account_instances_count = ContractInstances::new(
             Opts::new(
-                "carrot_app_bot_autocompounded_not_ready_count",
-                "Number of times contracts have skipped autocompound without errors",
+                "scraper_bot_remote_account_instances_count",
+                "Number of remote account instances",
             ),
-            &["contract_version"],
-        )
-        .unwrap();
-        let autocompounded_error_count = IntCounterVec::new(
-            Opts::new(
-                "carrot_app_bot_autocompounded_error_count",
-                "Number of times autocompounding errored",
-            ),
-            &["contract_version"],
-        )
-        .unwrap();
-        let contract_instances_to_autocompound = IntGauge::new(
-            "carrot_app_bot_contract_instances_to_autocompound",
-            "Number of instances that are eligible to be compounded",
-        )
-        .unwrap();
-        let contract_balance = IntGaugeVec::new(
-            Opts::new(
-                "carrot_app_bot_contract_balance",
-                "Funds managed by a specific carrot instance",
-            ),
-            &["contract_address", "contract_version"],
+            &["chain_id"],
         )
         .unwrap();
         registry.register(Box::new(fetch_count.clone())).unwrap();
         registry
-            .register(Box::new(fetch_instances_count.clone()))
+            .register(Box::new(local_account_instances_count.clone()))
             .unwrap();
         registry
-            .register(Box::new(autocompounded_count.clone()))
-            .unwrap();
-        registry
-            .register(Box::new(autocompounded_not_ready_count.clone()))
-            .unwrap();
-        registry
-            .register(Box::new(autocompounded_error_count.clone()))
-            .unwrap();
-        registry
-            .register(Box::new(contract_instances_to_autocompound.clone()))
-            .unwrap();
-        registry
-            .register(Box::new(contract_balance.clone()))
+            .register(Box::new(remote_account_instances_count.clone()))
             .unwrap();
         Self {
             fetch_count,
-            fetch_instances_count,
-            autocompounded_count,
-            autocompounded_not_ready_count,
-            autocompounded_error_count,
-            contract_instances_to_autocompound,
-            contract_balance,
+            local_account_instances_count,
+            remote_account_instances_count,
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Metrics, ScrapingChains};
+use crate::{abstract_state::AbstractState, Metrics, ScrapingChains};
 use abstract_client::{AbstractClient, AccountSource, Environment};
 use abstract_interface::{Abstract, Proxy};
 use abstract_std::{objects::AccountId, proxy::state::ACCOUNT_ID, PROXY, VERSION_CONTROL};
@@ -28,6 +28,8 @@ use tonic::transport::Channel;
 pub struct Scraper {
     // Fetch information
     pub fetch_cooldown: Duration,
+    // Abstract state
+    abstract_state: AbstractState,
     last_fetch: SystemTime,
     // Chains to Fetch
     // interchain: DaemonInterchain,
@@ -73,11 +75,17 @@ struct ValuedCoin {
 }
 
 impl Scraper {
-    pub fn new(interchain: ScrapingChains, fetch_cooldown: Duration, registry: &Registry) -> Self {
+    pub fn new(
+        interchain: ScrapingChains,
+        fetch_cooldown: Duration,
+        registry: &Registry,
+        abstract_state: AbstractState,
+    ) -> Self {
         let metrics = Metrics::new(registry);
 
         Self {
             fetch_cooldown,
+            abstract_state,
             last_fetch: SystemTime::UNIX_EPOCH,
             metrics,
             proxy_local_instances: Default::default(),
@@ -101,10 +109,10 @@ impl Scraper {
         for daemon_result in interchain.iter() {
             match daemon_result {
                 Ok(daemon) => {
-                    // Load proxy code id from abstract state
+                    // Get proxy code id from abstract state
                     let proxy_code_id = {
                         let mut abstr = Abstract::load_from(daemon.clone()).unwrap();
-                        // TODO: proxy is hidden inside abstract, should we expose it again?
+                        // TODO: replace with abstract_state
                         abstr
                             .get_contracts_mut()
                             .iter()
@@ -131,15 +139,29 @@ impl Scraper {
         dbg!(&self.proxy_local_instances);
         dbg!(&self.proxy_remote_instances);
 
-        let mut fetch_instances_count = 0;
-
         // Metrics
-        self.metrics.fetch_count.inc();
-        self.metrics
-            .fetch_instances_count
-            .set(fetch_instances_count as i64);
+        self.update_metrics();
 
         Ok(())
+    }
+
+    fn update_metrics(&mut self) {
+        self.metrics.fetch_count.inc();
+
+        for (chain_id, accounts) in self.proxy_local_instances.iter() {
+            let label = labels! {"chain_id" => chain_id.as_str()};
+            self.metrics
+                .local_account_instances_count
+                .with(&label)
+                .set(accounts.len() as u64);
+        }
+        for (chain_id, accounts) in self.proxy_remote_instances.iter() {
+            let label = labels! {"chain_id" => chain_id.as_str()};
+            self.metrics
+                .remote_account_instances_count
+                .with(&label)
+                .set(accounts.len() as u64);
+        }
     }
 }
 

@@ -6,9 +6,7 @@ RUN mkdir carrot_workspace
 WORKDIR /carrot_workspace
 
 # Copy your source tree
-COPY ./bot ./bot
-# Also copy Cargo.toml
-COPY Cargo.toml ./
+COPY . ./
 
 # RUN echo | ls && exit 1
 

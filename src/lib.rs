@@ -1,8 +1,10 @@
+mod abstract_state;
 mod bot;
 mod bot_args;
 mod metrics;
 mod scraping_chains;
 
+use abstract_state::AbstractState;
 pub use bot::Scraper;
 pub use bot_args::BotArgs;
 use cw_orch_interchain::{ChannelCreationValidator, IbcQueryHandler};
@@ -28,8 +30,14 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
     // Should be possible to replace ScrapingChains with DaemonInterchain with this:
     // https://github.com/AbstractSDK/cw-orchestrator/pull/352
     let chain_infos = ScrapingChains::new(vec![PION_1]);
+    let abstract_state = AbstractState::default();
 
-    let mut bot = Scraper::new(chain_infos, bot_args.fetch_cooldown, &registry);
+    let mut bot = Scraper::new(
+        chain_infos,
+        bot_args.fetch_cooldown,
+        &registry,
+        abstract_state,
+    );
 
     let metrics_rt = Runtime::new()?;
     metrics_rt.spawn(serve_metrics(registry.clone()));
@@ -41,14 +49,5 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
 
         // Wait for autocompound duration
         std::thread::sleep(bot.fetch_cooldown);
-
-        // TODO: reconnect all daemons after sleep?
-        // Maybe will be better to not build daemons until we actively use it
-
-        // Reconnect
-        // bot.daemon = Daemon::builder()
-        //     .handle(rt.handle())
-        //     .chain(chain_info.clone())
-        //     .build()?;
     }
 }
