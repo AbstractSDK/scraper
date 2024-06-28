@@ -1,17 +1,19 @@
+use crate::{Metrics, ScrapingChains};
 use abstract_client::{AbstractClient, AccountSource, Environment};
+use abstract_interface::{Abstract, Proxy};
+use abstract_std::{objects::AccountId, proxy::state::ACCOUNT_ID, PROXY, VERSION_CONTROL};
+use cosmos_sdk_proto::cosmwasm::wasm::v1::{
+    query_client::QueryClient, QueryContractsByCodeRequest, QueryRawContractStateRequest,
+};
 use cw_asset::AssetInfo;
-use cw_orch_interchain::DaemonInterchain;
+use cw_orch_interchain::IbcQueryHandler;
 use semver::VersionReq;
 
-use crate::Metrics;
-use cosmos_sdk_proto::cosmwasm::wasm::v1::{
-    query_client::QueryClient, QueryContractsByCodeRequest,
-};
-
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{from_json, Uint128};
 use cw_orch::{
     anyhow,
-    daemon::{queriers::Authz, Daemon},
+    daemon::{queriers::Authz, Daemon, RUNTIME},
+    environment::ChainState,
     prelude::*,
 };
 use log::{log, Level};
@@ -28,35 +30,27 @@ pub struct Scraper {
     pub fetch_cooldown: Duration,
     last_fetch: SystemTime,
     // Chains to Fetch
-    interchain: DaemonInterchain,
+    // interchain: DaemonInterchain,
+    interchain: ScrapingChains,
     // metrics
     metrics: Metrics,
-    // proxy instances
-    // Chain id -> proxy addresses
-    proxy_instances: HashMap<String, Vec<String>>,
+    // proxy local instances
+    // Chain id -> (account id, proxy addresses)
+    proxy_local_instances: HashMap<String, Vec<ProxyInstance>>,
+    // proxy remote instances
+    // Chain id -> (account id, proxy addresses)
+    proxy_remote_instances: HashMap<String, Vec<ProxyInstance>>,
 }
 
-#[derive(Eq, Hash, PartialEq, Clone)]
-struct CarrotInstance {
-    address: Addr,
-    version: String,
-}
-impl CarrotInstance {
-    fn new(address: Addr, version: &str) -> Self {
-        Self {
-            address,
-            version: version.to_string(),
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct ProxyInstance {
+    pub account_id: AccountId,
+    pub addr: String,
 }
 
-impl Display for CarrotInstance {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "CarrotInstance {{ address: {:?}, version: {} }}",
-            self.address, self.version
-        )
+impl ProxyInstance {
+    pub fn new(account_id: AccountId, addr: String) -> Self {
+        Self { account_id, addr }
     }
 }
 
@@ -79,20 +73,16 @@ struct ValuedCoin {
 }
 
 impl Scraper {
-    pub fn new(
-        interchain: DaemonInterchain,
-        fetch_cooldown: Duration,
-        registry: &Registry,
-        chain_ids: Vec<String>,
-    ) -> Self {
+    pub fn new(interchain: ScrapingChains, fetch_cooldown: Duration, registry: &Registry) -> Self {
         let metrics = Metrics::new(registry);
 
         Self {
             fetch_cooldown,
-            interchain,
             last_fetch: SystemTime::UNIX_EPOCH,
             metrics,
-            proxy_instances: HashMap::from_iter(chain_ids.into_iter().map(|id| (id, vec![]))),
+            proxy_local_instances: Default::default(),
+            proxy_remote_instances: Default::default(),
+            interchain,
         }
     }
 
@@ -108,13 +98,38 @@ impl Scraper {
 
         let interchain = &self.interchain;
 
-        // TODO: chain iterator for interchain?
-        for (chain_id, proxy_instances) in self.proxy_instances.iter_mut() {
-            // TODO: proxy_instances
-            *proxy_instances = vec![];
+        for daemon_result in interchain.iter() {
+            match daemon_result {
+                Ok(daemon) => {
+                    // Load proxy code id from abstract state
+                    let proxy_code_id = {
+                        let mut abstr = Abstract::load_from(daemon.clone()).unwrap();
+                        // TODO: proxy is hidden inside abstract, should we expose it again?
+                        abstr
+                            .get_contracts_mut()
+                            .iter()
+                            .find_map(|contract| {
+                                (contract.id() == PROXY).then(|| contract.code_id().unwrap())
+                            })
+                            .unwrap()
+                    };
+                    let chain_id = daemon.chain_id();
+                    // Save proxy instances for chain
+                    let (proxy_local_instances, proxy_remote_instances) =
+                        proxy_instances(daemon.channel(), proxy_code_id);
+                    self.proxy_local_instances
+                        .insert(chain_id.clone(), proxy_local_instances);
+                    self.proxy_remote_instances
+                        .insert(chain_id, proxy_remote_instances);
+                }
+                Err(e) => {
+                    log::error!("{e}");
+                }
+            }
         }
-        // let abstr = AbstractClient::new(self.daemon.clone())?;
-        // self.proxy_instances[chain_id] = vec![];
+
+        dbg!(&self.proxy_local_instances);
+        dbg!(&self.proxy_remote_instances);
 
         let mut fetch_instances_count = 0;
 
@@ -128,15 +143,47 @@ impl Scraper {
     }
 }
 
+fn proxy_instances(
+    channel: Channel,
+    proxy_code_id: u64,
+) -> (Vec<ProxyInstance>, Vec<ProxyInstance>) {
+    let mut proxy_local_instances = vec![];
+    let mut proxy_remote_instances = vec![];
+
+    // Load proxy addresses
+    let proxy_addrs = RUNTIME
+        .handle()
+        .block_on(utils::fetch_instances(channel.clone(), proxy_code_id))
+        .unwrap_or_default();
+
+    // Get all code ids
+    let mut client: QueryClient<Channel> = QueryClient::new(channel);
+    for proxy_addr in proxy_addrs {
+        if let Ok(response) =
+            RUNTIME.block_on(client.raw_contract_state(QueryRawContractStateRequest {
+                address: proxy_addr.clone(),
+                query_data: ACCOUNT_ID.as_slice().to_owned(),
+            }))
+        {
+            let account_id: AccountId = from_json(response.into_inner().data).unwrap();
+            if account_id.is_local() {
+                proxy_local_instances.push(ProxyInstance::new(account_id, proxy_addr));
+            } else {
+                proxy_remote_instances.push(ProxyInstance::new(account_id, proxy_addr));
+            }
+        }
+    }
+
+    (proxy_local_instances, proxy_remote_instances)
+}
+
 mod utils {
     use cosmos_sdk_proto::{
         cosmos::base::query::v1beta1::{PageRequest, PageResponse},
         cosmwasm::wasm::v1::QueryContractsByCodeResponse,
     };
-    use cw_asset::AssetBase;
 
     use super::*;
-    const MIN_REWARD: (&str, Uint128) = ("uosmo", Uint128::new(100_000));
 
     pub fn next_page_request(page_response: PageResponse) -> PageRequest {
         PageRequest {
@@ -149,11 +196,7 @@ mod utils {
     }
 
     /// Get the contract instances of a given code_id
-    pub async fn fetch_instances(
-        channel: Channel,
-        code_id: u64,
-        version: &str,
-    ) -> anyhow::Result<Vec<String>> {
+    pub async fn fetch_instances(channel: Channel, code_id: u64) -> anyhow::Result<Vec<String>> {
         let mut cw_querier = QueryClient::new(channel);
 
         let mut contract_addrs = vec![];
@@ -179,7 +222,7 @@ mod utils {
                 }
                 // Done with pagination can return out all of the contracts
                 _ => {
-                    log!(Level::Info, "Savings addrs({version}): {contract_addrs:?}");
+                    log!(Level::Info, "Savings addrs: {contract_addrs:?}");
                     break anyhow::Ok(contract_addrs);
                 }
             }
@@ -200,13 +243,5 @@ mod utils {
             "contract: {contract_addr:?} balance: {balance:?}"
         );
         Ok(balance)
-    }
-
-    pub fn enough_rewards(rewards: AssetBase<String>) -> bool {
-        let gas_asset = match rewards.info {
-            cw_asset::AssetInfoBase::Native(denom) => denom == MIN_REWARD.0,
-            _ => false,
-        };
-        gas_asset && rewards.amount >= MIN_REWARD.1
     }
 }

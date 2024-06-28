@@ -7,7 +7,6 @@ WORKDIR /carrot_workspace
 
 # Copy your source tree
 COPY ./bot ./bot
-COPY ./contracts ./contracts
 # Also copy Cargo.toml
 COPY Cargo.toml ./
 
@@ -33,4 +32,4 @@ ENTRYPOINT ["./entrypoint.sh"]
 EXPOSE 8080
 
 # Command to run the binary
-CMD ./prod --fcd 1d --acd 1h $GRPC_OPTION
+CMD ./prod --fcd 1h $GRPC_OPTION
