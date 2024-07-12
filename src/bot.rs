@@ -56,23 +56,23 @@ impl ProxyInstance {
     }
 }
 
-struct Balance {
-    coins: Vec<ValuedCoin>,
-}
-impl Balance {
-    fn new(coins: Vec<ValuedCoin>) -> Self {
-        Self { coins }
-    }
-    fn calculate_usd_value(self) -> Uint128 {
-        self.coins.iter().fold(Uint128::zero(), |acc, c| {
-            acc + c.coin.amount.checked_mul(c.usd_value).unwrap()
-        })
-    }
-}
-struct ValuedCoin {
-    coin: Coin,
-    usd_value: Uint128,
-}
+// struct Balance {
+//     coins: Vec<ValuedCoin>,
+// }
+// impl Balance {
+//     fn new(coins: Vec<ValuedCoin>) -> Self {
+//         Self { coins }
+//     }
+//     fn calculate_usd_value(self) -> Uint128 {
+//         self.coins.iter().fold(Uint128::zero(), |acc, c| {
+//             acc + c.coin.amount.checked_mul(c.usd_value).unwrap()
+//         })
+//     }
+// }
+// struct ValuedCoin {
+//     coin: Coin,
+//     usd_value: Uint128,
+// }
 
 impl Scraper {
     pub fn new(
@@ -110,34 +110,24 @@ impl Scraper {
             match daemon_result {
                 Ok(daemon) => {
                     // Get proxy code id from abstract state
-                    let proxy_code_id = {
-                        let mut abstr = Abstract::load_from(daemon.clone()).unwrap();
-                        // TODO: replace with abstract_state
-                        abstr
-                            .get_contracts_mut()
-                            .iter()
-                            .find_map(|contract| {
-                                (contract.id() == PROXY).then(|| contract.code_id().unwrap())
-                            })
-                            .unwrap()
-                    };
-                    let chain_id = daemon.chain_id();
+                    let env_info = daemon.env_info();
+                    let proxy_code_id = self.abstract_state.contract_code_id(&env_info, PROXY);
+                    let chain_id = env_info.chain_id;
                     // Save proxy instances for chain
                     let (proxy_local_instances, proxy_remote_instances) =
                         proxy_instances(daemon.channel(), proxy_code_id);
                     self.proxy_local_instances
                         .insert(chain_id.clone(), proxy_local_instances);
                     self.proxy_remote_instances
-                        .insert(chain_id, proxy_remote_instances);
+                        .insert(chain_id.clone(), proxy_remote_instances);
+                    dbg!(&self.proxy_local_instances[&chain_id].len());
+                    dbg!(&self.proxy_remote_instances[&chain_id].len());
                 }
                 Err(e) => {
                     log::error!("{e}");
                 }
             }
         }
-
-        dbg!(&self.proxy_local_instances);
-        dbg!(&self.proxy_remote_instances);
 
         // Metrics
         self.update_metrics();
@@ -178,7 +168,7 @@ fn proxy_instances(
         .block_on(utils::fetch_instances(channel.clone(), proxy_code_id))
         .unwrap_or_default();
 
-    // Get all code ids
+    // Get all addrs
     let mut client: QueryClient<Channel> = QueryClient::new(channel);
     for proxy_addr in proxy_addrs {
         if let Ok(response) =
@@ -188,6 +178,7 @@ fn proxy_instances(
             }))
         {
             let account_id: AccountId = from_json(response.into_inner().data).unwrap();
+            log::debug!("Saving proxy addr: {proxy_addr} for {account_id}");
             if account_id.is_local() {
                 proxy_local_instances.push(ProxyInstance::new(account_id, proxy_addr));
             } else {
@@ -223,8 +214,15 @@ mod utils {
 
         let mut contract_addrs = vec![];
         let mut pagination = None;
-
+        let mut page_number = 0;
         loop {
+            log::debug!(
+                "Fetching instances of {code_id}, page[{page_number}] key: {page_key:?}",
+                page_key = pagination
+                    .as_ref()
+                    .map(|p: &PageRequest| String::from_utf8_lossy(&p.key))
+                    .unwrap_or_default()
+            );
             let QueryContractsByCodeResponse {
                 mut contracts,
                 pagination: next_pagination,
@@ -240,6 +238,7 @@ mod utils {
             match next_pagination {
                 // `next_key` can still be empty, meaning there are no next key
                 Some(page_response) if !page_response.next_key.is_empty() => {
+                    page_number += 1;
                     pagination = Some(next_page_request(page_response))
                 }
                 // Done with pagination can return out all of the contracts
@@ -251,19 +250,19 @@ mod utils {
         }
     }
 
-    /// gets the balance managed by an instance
-    pub fn get_proxy_balance(
-        daemon: Daemon,
-        assets_values: &HashMap<AssetInfo, Uint128>,
-        contract_addr: &Addr,
-    ) -> anyhow::Result<Uint128> {
-        // TODO: get proxy balance to summarize TVL
-        let balance = Balance::new(vec![]);
-        let balance = balance.calculate_usd_value();
-        log!(
-            Level::Info,
-            "contract: {contract_addr:?} balance: {balance:?}"
-        );
-        Ok(balance)
-    }
+    // /// gets the balance managed by an instance
+    // pub fn get_proxy_balance(
+    //     daemon: Daemon,
+    //     assets_values: &HashMap<AssetInfo, Uint128>,
+    //     contract_addr: &Addr,
+    // ) -> anyhow::Result<Uint128> {
+    //     // TODO: get proxy balance to summarize TVL
+    //     let balance = Balance::new(vec![]);
+    //     let balance = balance.calculate_usd_value();
+    //     log!(
+    //         Level::Info,
+    //         "contract: {contract_addr:?} balance: {balance:?}"
+    //     );
+    //     Ok(balance)
+    // }
 }
