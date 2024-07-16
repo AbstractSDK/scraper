@@ -27,7 +27,7 @@ RUN mv target/release/prod .
 COPY ./entrypoint.sh ./entrypoint.sh
 RUN chmod +x entrypoint.sh
 ENTRYPOINT ["./entrypoint.sh"]
-EXPOSE 8080
+EXPOSE 80
 
 # Command to run the binary
 CMD ./prod --fcd 1h $GRPC_OPTION
