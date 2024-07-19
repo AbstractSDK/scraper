@@ -1,5 +1,4 @@
 use crate::{abstract_state::AbstractState, Metrics, ScrapingChains};
-use abstract_client::AbstractClient;
 use abstract_std::{objects::AccountId, version_control::AccountBase, VERSION_CONTROL};
 use cosmos_sdk_proto::cosmwasm::wasm::v1::{
     query_client::QueryClient, QueryContractsByCodeRequest,

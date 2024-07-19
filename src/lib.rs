@@ -11,7 +11,11 @@ use metrics::serve_metrics;
 pub use metrics::Metrics;
 pub use scraping_chains::ScrapingChains;
 
-use cw_orch::{anyhow, daemon::networks::PION_1, tokio::runtime::Runtime};
+use cw_orch::{
+    anyhow,
+    daemon::networks::{ARCHWAY_1, JUNO_1, PION_1},
+    tokio::runtime::Runtime,
+};
 
 use prometheus::Registry;
 
@@ -21,7 +25,7 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
     // TODO: We can't store daemons/interchain for long living task because of disconnect
     // Should be possible to replace ScrapingChains with DaemonInterchain with this:
     // https://github.com/AbstractSDK/cw-orchestrator/pull/352
-    let chain_infos = ScrapingChains::new(vec![PION_1]);
+    let chain_infos = ScrapingChains::new(vec![PION_1, JUNO_1, ARCHWAY_1]);
 
     let mut bot = Scraper::new(chain_infos, bot_args.fetch_cooldown, &registry);
 
