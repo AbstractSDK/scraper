@@ -1,5 +1,5 @@
 use cw_orch::{
-    daemon::{Daemon, DaemonError},
+    daemon::{senders::QueryOnlySender, Daemon, DaemonBase, DaemonError},
     environment::ChainInfo,
 };
 
@@ -28,12 +28,12 @@ pub struct ScrapingChainsIterator<'a> {
 }
 
 impl<'a> Iterator for ScrapingChainsIterator<'a> {
-    type Item = Result<Daemon, DaemonError>;
+    type Item = Result<DaemonBase<QueryOnlySender>, DaemonError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(chain) = self.chains.0.get(self.index) {
             self.index += 1;
-            Some(Daemon::builder(chain.clone()).build())
+            Some(Daemon::builder(chain.clone()).build_sender(()))
         } else {
             None
         }

@@ -12,9 +12,9 @@ path = "src/bin/local.rs"
 cw-orch = { version = "0.24.0", features = ["daemon"] }
 cw-orch-interchain = { version = "0.3.0", features = ["daemon"] }
 
-abstract-interface = { version = "0.23.0" }
-abstract-client = { version = "0.23.0" }
-abstract-std = { version = "0.23.0" }
+abstract-interface = { git = "https://github.com/AbstractSDK/abstract", branch = "scraper_updates", version = "0.23.0" }
+abstract-client = { git = "https://github.com/AbstractSDK/abstract", branch = "scraper_updates", version = "0.23.0" }
+abstract-std = { git = "https://github.com/AbstractSDK/abstract", branch = "scraper_updates", version = "0.23.0" }
 
 cw-asset = { version = "3.0" }
 

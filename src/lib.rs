@@ -1,4 +1,4 @@
-// mod abstract_state;
+mod abstract_state;
 mod bot;
 mod bot_args;
 mod contract_state;

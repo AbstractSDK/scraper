@@ -1,6 +1,6 @@
-use crate::{Metrics, ScrapingChains};
+use crate::{abstract_state::AbstractState, Metrics, ScrapingChains};
 use abstract_client::AbstractClient;
-use abstract_std::{objects::AccountId, version_control::AccountBase};
+use abstract_std::{objects::AccountId, version_control::AccountBase, VERSION_CONTROL};
 use cosmos_sdk_proto::cosmwasm::wasm::v1::{
     query_client::QueryClient, QueryContractsByCodeRequest,
 };
@@ -29,6 +29,7 @@ pub struct Scraper {
     // proxy remote instances
     // Chain id -> (account id, proxy addresses)
     account_remote_instances: HashMap<String, Vec<AccountInstance>>,
+    abstract_state: AbstractState,
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +55,7 @@ impl Scraper {
             account_local_instances: Default::default(),
             account_remote_instances: Default::default(),
             interchain,
+            abstract_state: AbstractState::default(),
         }
     }
 
@@ -74,13 +76,15 @@ impl Scraper {
                 Ok(daemon) => {
                     // Get proxy code id from abstract state
                     let env_info = daemon.env_info();
-                    let abstr = AbstractClient::new(daemon.clone())?;
+                    let version_control_addr = self
+                        .abstract_state
+                        .contract_addr(&env_info, VERSION_CONTROL);
+                    // let abstr = AbstractClient::new(daemon.clone())?;
 
-                    // let proxy_code_id = self.abstract_state.contract_code_id(&env_info, PROXY);
                     let chain_id = env_info.chain_id;
                     // Save account instances for chain
                     let (account_local_instances, account_remote_instances) =
-                        account_instances(daemon.channel(), abstr.version_control().address()?);
+                        account_instances(daemon.channel(), version_control_addr);
                     self.account_local_instances
                         .insert(chain_id.clone(), account_local_instances);
                     self.account_remote_instances
