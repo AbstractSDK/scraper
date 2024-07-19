@@ -1,6 +1,7 @@
 mod abstract_state;
 mod bot;
 mod bot_args;
+mod contract_state;
 mod metrics;
 mod scraping_chains;
 
