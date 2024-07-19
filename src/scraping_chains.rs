@@ -33,7 +33,7 @@ impl<'a> Iterator for ScrapingChainsIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(chain) = self.chains.0.get(self.index) {
             self.index += 1;
-            Some(Daemon::builder().chain(chain.clone()).build())
+            Some(Daemon::builder(chain.clone()).build())
         } else {
             None
         }

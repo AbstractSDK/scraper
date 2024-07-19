@@ -1,29 +1,15 @@
-use crate::{abstract_state::AbstractState, Metrics, ScrapingChains};
-use abstract_client::{AbstractClient, AccountSource, Environment};
-use abstract_interface::{Abstract, Proxy};
-use abstract_std::{
-    objects::AccountId, proxy::state::ACCOUNT_ID, version_control::AccountBase, PROXY,
-    VERSION_CONTROL,
-};
+use crate::{Metrics, ScrapingChains};
+use abstract_client::AbstractClient;
+use abstract_std::{objects::AccountId, version_control::AccountBase};
 use cosmos_sdk_proto::cosmwasm::wasm::v1::{
-    query_client::QueryClient, QueryContractsByCodeRequest, QueryRawContractStateRequest,
+    query_client::QueryClient, QueryContractsByCodeRequest,
 };
-use cw_asset::AssetInfo;
-use cw_orch_interchain::IbcQueryHandler;
-use semver::VersionReq;
 
-use cosmwasm_std::{from_json, Uint128};
-use cw_orch::{
-    anyhow,
-    daemon::{queriers::Authz, Daemon, RUNTIME},
-    environment::ChainState,
-    prelude::*,
-};
+use cw_orch::{anyhow, daemon::RUNTIME, prelude::*};
 use log::{log, Level};
 use prometheus::{labels, Registry};
 use std::{
-    collections::{HashMap, HashSet},
-    fmt::{Display, Formatter},
+    collections::HashMap,
     time::{Duration, SystemTime},
 };
 use tonic::transport::Channel;
@@ -31,8 +17,6 @@ use tonic::transport::Channel;
 pub struct Scraper {
     // Fetch information
     pub fetch_cooldown: Duration,
-    // Abstract state
-    abstract_state: AbstractState,
     last_fetch: SystemTime,
     // Chains to Fetch
     // interchain: DaemonInterchain,
@@ -59,48 +43,12 @@ impl AccountInstance {
     }
 }
 
-// #[derive(Clone, Debug)]
-// pub struct ProxyInstance {
-//     pub account_id: AccountId,
-//     pub addr: String,
-// }
-
-// impl ProxyInstance {
-//     pub fn new(account_id: AccountId, addr: String) -> Self {
-//         Self { account_id, addr }
-//     }
-// }
-
-// struct Balance {
-//     coins: Vec<ValuedCoin>,
-// }
-// impl Balance {
-//     fn new(coins: Vec<ValuedCoin>) -> Self {
-//         Self { coins }
-//     }
-//     fn calculate_usd_value(self) -> Uint128 {
-//         self.coins.iter().fold(Uint128::zero(), |acc, c| {
-//             acc + c.coin.amount.checked_mul(c.usd_value).unwrap()
-//         })
-//     }
-// }
-// struct ValuedCoin {
-//     coin: Coin,
-//     usd_value: Uint128,
-// }
-
 impl Scraper {
-    pub fn new(
-        interchain: ScrapingChains,
-        fetch_cooldown: Duration,
-        registry: &Registry,
-        abstract_state: AbstractState,
-    ) -> Self {
+    pub fn new(interchain: ScrapingChains, fetch_cooldown: Duration, registry: &Registry) -> Self {
         let metrics = Metrics::new(registry);
 
         Self {
             fetch_cooldown,
-            abstract_state,
             last_fetch: SystemTime::UNIX_EPOCH,
             metrics,
             account_local_instances: Default::default(),
@@ -139,6 +87,7 @@ impl Scraper {
                         .insert(chain_id.clone(), account_remote_instances);
                     dbg!(&self.account_local_instances[&chain_id].len());
                     dbg!(&self.account_remote_instances[&chain_id].len());
+                    dbg!(chain_id);
                 }
                 Err(e) => {
                     log::error!("{e}");
@@ -171,41 +120,6 @@ impl Scraper {
         }
     }
 }
-
-// fn proxy_instances(
-//     channel: Channel,
-//     proxy_code_id: u64,
-// ) -> (Vec<ProxyInstance>, Vec<ProxyInstance>) {
-//     let mut proxy_local_instances = vec![];
-//     let mut proxy_remote_instances = vec![];
-
-//     // Load proxy addresses
-//     let proxy_addrs = RUNTIME
-//         .handle()
-//         .block_on(utils::fetch_instances(channel.clone(), proxy_code_id))
-//         .unwrap_or_default();
-
-//     // Get all addrs
-//     let mut client: QueryClient<Channel> = QueryClient::new(channel);
-//     for proxy_addr in proxy_addrs {
-//         if let Ok(response) =
-//             RUNTIME.block_on(client.raw_contract_state(QueryRawContractStateRequest {
-//                 address: proxy_addr.clone(),
-//                 query_data: ACCOUNT_ID.as_slice().to_owned(),
-//             }))
-//         {
-//             let account_id: AccountId = from_json(response.into_inner().data).unwrap();
-//             log::debug!("Saving proxy addr: {proxy_addr} for {account_id}");
-//             if account_id.is_local() {
-//                 proxy_local_instances.push(ProxyInstance::new(account_id, proxy_addr));
-//             } else {
-//                 proxy_remote_instances.push(ProxyInstance::new(account_id, proxy_addr));
-//             }
-//         }
-//     }
-
-//     (proxy_local_instances, proxy_remote_instances)
-// }
 
 fn account_instances(
     channel: Channel,
@@ -240,6 +154,10 @@ fn account_instances(
         }
     }
 
+    // for module in abstract_std::version_control::state::REGISTERED_MODULES.prefix().range(&version_control_state, None, None, cosmwasm_std::Order::Ascending) {
+
+    // }
+
     (local_instances, remote_instances)
 }
 
@@ -267,6 +185,7 @@ mod utils {
     }
 
     /// Get the contract instances of a given code_id
+    #[allow(unused)]
     pub async fn fetch_instances(channel: Channel, code_id: u64) -> anyhow::Result<Vec<String>> {
         let mut cw_querier = QueryClient::new(channel);
 
@@ -353,20 +272,4 @@ mod utils {
             }
         }
     }
-
-    // /// gets the balance managed by an instance
-    // pub fn get_proxy_balance(
-    //     daemon: Daemon,
-    //     assets_values: &HashMap<AssetInfo, Uint128>,
-    //     contract_addr: &Addr,
-    // ) -> anyhow::Result<Uint128> {
-    //     // TODO: get proxy balance to summarize TVL
-    //     let balance = Balance::new(vec![]);
-    //     let balance = balance.calculate_usd_value();
-    //     log!(
-    //         Level::Info,
-    //         "contract: {contract_addr:?} balance: {balance:?}"
-    //     );
-    //     Ok(balance)
-    // }
 }
