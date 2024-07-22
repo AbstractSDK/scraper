@@ -2,12 +2,13 @@ use prometheus::{core::AtomicU64, Encoder, IntCounter, Opts, Registry, TextEncod
 
 use warp::Filter;
 
-pub type ContractInstances = prometheus::core::GenericGaugeVec<AtomicU64>;
+pub type UIntGaugeVec = prometheus::core::GenericGaugeVec<AtomicU64>;
 
 pub struct Metrics {
     pub fetch_count: IntCounter,
-    pub local_account_instances_count: ContractInstances,
-    pub remote_account_instances_count: ContractInstances,
+    pub local_account_instances_count: UIntGaugeVec,
+    pub remote_account_instances_count: UIntGaugeVec,
+    pub contracts_by_namespace_count: UIntGaugeVec,
 }
 
 impl Metrics {
@@ -17,7 +18,7 @@ impl Metrics {
             "Number of times the bot has fetched the instances",
         )
         .unwrap();
-        let local_account_instances_count = ContractInstances::new(
+        let local_account_instances_count = UIntGaugeVec::new(
             Opts::new(
                 "scraper_bot_local_account_instances_count",
                 "Number of local account instances",
@@ -25,7 +26,7 @@ impl Metrics {
             &["chain_id"],
         )
         .unwrap();
-        let remote_account_instances_count = ContractInstances::new(
+        let remote_account_instances_count = UIntGaugeVec::new(
             Opts::new(
                 "scraper_bot_remote_account_instances_count",
                 "Number of remote account instances",
@@ -33,6 +34,15 @@ impl Metrics {
             &["chain_id"],
         )
         .unwrap();
+        let contracts_by_namespace_count = UIntGaugeVec::new(
+            Opts::new(
+                "scraper_bot_contracts_by_namespace",
+                "Number of contracts by namespace",
+            ),
+            &["chain_id", "namespace"],
+        )
+        .unwrap();
+
         registry.register(Box::new(fetch_count.clone())).unwrap();
         registry
             .register(Box::new(local_account_instances_count.clone()))
@@ -40,10 +50,14 @@ impl Metrics {
         registry
             .register(Box::new(remote_account_instances_count.clone()))
             .unwrap();
+        registry
+            .register(Box::new(contracts_by_namespace_count.clone()))
+            .unwrap();
         Self {
             fetch_count,
             local_account_instances_count,
             remote_account_instances_count,
+            contracts_by_namespace_count,
         }
     }
 }

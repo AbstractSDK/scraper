@@ -8,6 +8,6 @@ fn main() -> anyhow::Result<()> {
     dotenv().ok();
     env_logger::init();
 
-    let bot_args = savings_bot::BotArgs::parse();
+    let bot_args = savings_bot::ScraperArgs::parse();
     cron_main(bot_args)
 }

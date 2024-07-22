@@ -4,7 +4,7 @@ use std::time::Duration;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-pub struct BotArgs {
+pub struct ScraperArgs {
     /// Fetch cooldown
     #[arg(long = "fcd", value_parser = parse_duration, value_name = "DURATION")]
     pub fetch_cooldown: Duration,

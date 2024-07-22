@@ -1,15 +1,13 @@
-mod abstract_state;
-mod bot;
-mod bot_args;
+mod abstract_daemon_state;
+mod args;
 mod contract_state;
 mod metrics;
-mod scraping_chains;
+mod scraper;
 
-pub use bot::Scraper;
-pub use bot_args::BotArgs;
+pub use args::ScraperArgs;
 use metrics::serve_metrics;
 pub use metrics::Metrics;
-pub use scraping_chains::ScrapingChains;
+pub use scraper::{scraping_chains::ScrapingChains, Scraper};
 
 use cw_orch::{
     anyhow,
@@ -20,14 +18,14 @@ use cw_orch::{
 use prometheus::Registry;
 
 /// entrypoint for the bot
-pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
+pub fn cron_main(bot_args: ScraperArgs) -> anyhow::Result<()> {
     let registry = Registry::new();
     // TODO: We can't store daemons/interchain for long living task because of disconnect
     // Should be possible to replace ScrapingChains with DaemonInterchain with this:
     // https://github.com/AbstractSDK/cw-orchestrator/pull/352
     let chain_infos = ScrapingChains::new(vec![PION_1, JUNO_1, ARCHWAY_1]);
 
-    let mut bot = Scraper::new(chain_infos, bot_args.fetch_cooldown, &registry);
+    let mut bot = Scraper::new(bot_args.fetch_cooldown, &registry);
 
     let metrics_rt = Runtime::new()?;
     metrics_rt.spawn(serve_metrics(registry.clone()));
@@ -35,7 +33,7 @@ pub fn cron_main(bot_args: BotArgs) -> anyhow::Result<()> {
     // Run long-running autocompound job.
     loop {
         // You can edit retries with CW_ORCH_MAX_TX_QUERY_RETRIES
-        bot.scrape()?;
+        bot.scrape(&chain_infos)?;
 
         // Wait for autocompound duration
         std::thread::sleep(bot.fetch_cooldown);

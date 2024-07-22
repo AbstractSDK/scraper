@@ -1,14 +1,16 @@
+#![allow(unused)]
+
 use cw_orch::environment::EnvironmentInfo;
 
-pub struct AbstractState(serde_json::Value);
+pub struct AbstractDaemonState(serde_json::Value);
 
-impl Default for AbstractState {
+impl Default for AbstractDaemonState {
     fn default() -> Self {
         Self(abstract_interface::State::load_state())
     }
 }
 
-impl AbstractState {
+impl AbstractDaemonState {
     pub fn contract_addr(
         &self,
         env_info: &EnvironmentInfo,
