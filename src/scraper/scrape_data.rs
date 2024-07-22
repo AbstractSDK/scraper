@@ -91,6 +91,7 @@ impl ScrapedData {
     ) -> HashMap<String, Vec<(ModuleInfo, ModuleReference)>> {
         let mut modules_by_namespace: HashMap<String, Vec<(ModuleInfo, ModuleReference)>> =
             HashMap::new();
+        // This will collect every version of the module, should we collect only latest instead?
         for (module_info, module_reference) in
             abstract_std::version_control::state::REGISTERED_MODULES
                 .range(
