@@ -88,9 +88,6 @@ impl Scraper {
                         .insert(chain_id.clone(), account_local_instances);
                     self.account_remote_instances
                         .insert(chain_id.clone(), account_remote_instances);
-                    dbg!(&self.account_local_instances[&chain_id].len());
-                    dbg!(&self.account_remote_instances[&chain_id].len());
-                    dbg!(chain_id);
                 }
                 Err(e) => {
                     log::error!("{e}");

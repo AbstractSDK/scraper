@@ -30,4 +30,4 @@ ENTRYPOINT ["./entrypoint.sh"]
 EXPOSE 80
 
 # Command to run the binary
-CMD ./prod --fcd 1h $GRPC_OPTION
+CMD ./prod --fcd 1d $GRPC_OPTION
