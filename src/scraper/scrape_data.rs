@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-
-use crate::{abstract_daemon_state::AbstractDaemonState, contract_state::ContractState};
+use abstract_interface::AbstractDaemonState;
+use crate::{contract_state::ContractState};
 
 use super::utils;
 use abstract_std::{
@@ -37,8 +37,9 @@ pub struct ScrapedData {
 
 impl ScrapedData {
     pub fn scrape_data(daemon: &QueryOnlyDaemon, abstract_state: &AbstractDaemonState) -> Self {
+        let env_info = daemon.env_info();
         let registry_addr =
-            abstract_state.contract_addr(&daemon.env_info(), REGISTRY);
+            abstract_state.contract_addr(&env_info.chain_id, REGISTRY).unwrap();
 
         // Load version control state
         let registry_state = RUNTIME

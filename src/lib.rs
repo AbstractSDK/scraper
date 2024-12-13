@@ -1,4 +1,3 @@
-mod abstract_daemon_state;
 mod args;
 mod contract_state;
 mod metrics;
