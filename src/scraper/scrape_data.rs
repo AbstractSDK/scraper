@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-
-use crate::{abstract_daemon_state::AbstractDaemonState, contract_state::ContractState};
+use abstract_interface::AbstractDaemonState;
+use crate::{contract_state::ContractState};
 
 use super::utils;
 use abstract_std::{
     objects::{module::ModuleInfo, module_reference::ModuleReference, AccountId},
-    version_control::AccountBase,
-    VERSION_CONTROL,
+    registry::Account,
+    REGISTRY,
 };
 use cw_orch::{
     daemon::{senders::QueryOnlyDaemon, RUNTIME},
@@ -16,11 +16,11 @@ use cw_orch::{
 #[derive(Clone, Debug)]
 pub struct AccountInstance {
     pub account_id: AccountId,
-    pub base: AccountBase,
+    pub base: Account,
 }
 
 impl AccountInstance {
-    pub fn new(account_id: AccountId, base: AccountBase) -> Self {
+    pub fn new(account_id: AccountId, base: Account) -> Self {
         Self { account_id, base }
     }
 }
@@ -37,22 +37,23 @@ pub struct ScrapedData {
 
 impl ScrapedData {
     pub fn scrape_data(daemon: &QueryOnlyDaemon, abstract_state: &AbstractDaemonState) -> Self {
-        let version_control_addr =
-            abstract_state.contract_addr(&daemon.env_info(), VERSION_CONTROL);
+        let env_info = daemon.env_info();
+        let registry_addr =
+            abstract_state.contract_addr(&env_info.chain_id, REGISTRY).unwrap();
 
         // Load version control state
-        let version_control_state = RUNTIME
+        let registry_state = RUNTIME
             .handle()
             .block_on(utils::fetch_contract_state(
                 daemon.channel(),
-                version_control_addr,
+                registry_addr,
             ))
             .unwrap_or_default();
 
         let (account_local_instances, account_remote_instances) =
-            Self::account_instances(&version_control_state);
+            Self::account_instances(&registry_state);
 
-        let modules_by_namespace = Self::modules_by_namespace(&version_control_state);
+        let modules_by_namespace = Self::modules_by_namespace(&registry_state);
 
         Self {
             account_local_instances,
@@ -62,14 +63,14 @@ impl ScrapedData {
     }
 
     fn account_instances(
-        version_control_state: &ContractState,
+        registry_state: &ContractState,
     ) -> (Vec<AccountInstance>, Vec<AccountInstance>) {
         let mut local_instances = vec![];
         let mut remote_instances = vec![];
         // Sort all accounts
-        for (account_id, base) in abstract_std::version_control::state::ACCOUNT_ADDRESSES
+        for (account_id, base) in abstract_std::registry::state::ACCOUNT_ADDRESSES
             .range(
-                version_control_state,
+                registry_state,
                 None,
                 None,
                 cosmwasm_std::Order::Ascending,
@@ -87,15 +88,15 @@ impl ScrapedData {
     }
 
     fn modules_by_namespace(
-        version_control_state: &ContractState,
+        registry_state: &ContractState,
     ) -> HashMap<String, Vec<(ModuleInfo, ModuleReference)>> {
         let mut modules_by_namespace: HashMap<String, Vec<(ModuleInfo, ModuleReference)>> =
             HashMap::new();
         // This will collect every version of the module, should we collect only latest instead?
         for (module_info, module_reference) in
-            abstract_std::version_control::state::REGISTERED_MODULES
+            abstract_std::registry::state::REGISTERED_MODULES
                 .range(
-                    version_control_state,
+                    registry_state,
                     None,
                     None,
                     cosmwasm_std::Order::Ascending,

@@ -2,7 +2,7 @@ mod scrape_data;
 pub mod scraping_chains;
 mod utils;
 
-use crate::{abstract_daemon_state::AbstractDaemonState, Metrics};
+use crate::{Metrics};
 
 use cw_orch::{anyhow, prelude::*};
 use log::{log, Level};
@@ -10,6 +10,7 @@ use prometheus::{labels, Registry};
 use scrape_data::ScrapedData;
 use scraping_chains::ScrapingChains;
 use std::time::{Duration, SystemTime};
+use abstract_interface::AbstractDaemonState;
 
 pub struct Scraper {
     // Fetch information

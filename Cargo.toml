@@ -9,21 +9,21 @@ name = "local"
 path = "src/bin/local.rs"
 
 [dependencies]
-cw-orch = { version = "0.24.0", features = ["daemon"] }
-cw-orch-interchain = { version = "0.3.0", features = ["daemon"] }
+cw-orch = { version = "0.27.0", features = ["daemon"] }
+cw-orch-interchain = { version = "0.8.1", features = ["daemon"] }
 
-abstract-interface = { git = "https://github.com/AbstractSDK/abstract", branch = "scraper_updates", version = "0.23.0" }
-abstract-client = { git = "https://github.com/AbstractSDK/abstract", branch = "scraper_updates", version = "0.23.0" }
-abstract-std = { git = "https://github.com/AbstractSDK/abstract", branch = "scraper_updates", version = "0.23.0" }
+abstract-interface = { git = "https://github.com/AbstractSDK/abstract", version = "0.25.0", tag = "v0.25.0" }
+abstract-client = { git = "https://github.com/AbstractSDK/abstract", version = "0.25.0", tag = "v0.25.0" }
+abstract-std = { git = "https://github.com/AbstractSDK/abstract", version = "0.25.0", tag = "v0.25.0" }
 
 cw-asset = { version = "3.0" }
 
-cosmwasm-std = { version = "1.2" }
-cosmos-sdk-proto = { version = "0.20.0" }
+cosmwasm-std = { version = "2.0.8" }
+cosmos-sdk-proto = { version = "0.26.1", features = ["cosmwasm"] }
 dotenv = "0.15.0"
-env_logger = "0.11.2"
+env_logger = { package = "pretty_env_logger", version = "0.2.3" }
 log = "0.4.20"
-tonic = "0.10.0"
+tonic = "0.12.1"
 clap = { version = "4", features = ["derive"] }
 humantime = "2.1.0"
 prometheus = "0.13.2"
